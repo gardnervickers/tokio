@@ -76,8 +76,8 @@ where
     F: FnOnce() -> R + Send + 'static,
 {
     ThreadContext::with_blocking_pool(|pool| {
-        let schedule = match pool {
-            Some(ptr) => unsafe { &**ptr },
+        let schedule = match *pool {
+            Some(ptr) => unsafe { &*ptr },
             None => panic!("not currently running on the Tokio runtime."),
         };
 

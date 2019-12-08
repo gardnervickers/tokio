@@ -132,9 +132,9 @@ cfg_test_util! {
     /// Return the current instant, factoring in frozen time.
     pub(crate) fn now() -> Instant {
         ThreadContext::with_clock(|clock| {
-            Instant::from_std(match clock {
+            Instant::from_std(match *clock {
                 Some(ptr) => {
-                    let clock = unsafe { &**ptr };
+                    let clock = unsafe { &*ptr };
 
                     if let Some(frozen) = *clock.inner.frozen.lock().unwrap() {
                         clock.inner.start + frozen
