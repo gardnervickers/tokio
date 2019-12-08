@@ -1,11 +1,10 @@
 use crate::runtime::basic_scheduler;
+use crate::runtime::context::ThreadContext;
 use crate::task::JoinHandle;
-
-use std::cell::Cell;
 use std::future::Future;
 
-#[derive(Clone, Copy)]
-enum State {
+#[derive(Debug, Clone, Copy)]
+pub(super) enum State {
     // default executor not defined
     Empty,
 
@@ -17,11 +16,6 @@ enum State {
     ThreadPool(*const thread_pool::Spawner),
 }
 
-thread_local! {
-    /// Thread-local tracking the current executor
-    static EXECUTOR: Cell<State> = Cell::new(State::Empty)
-}
-
 // ===== global spawn fns =====
 
 /// Spawns a future on the default executor.
@@ -30,24 +24,26 @@ where
     T: Future + Send + 'static,
     T::Output: Send + 'static,
 {
-    EXECUTOR.with(|current_executor| match current_executor.get() {
-        #[cfg(feature = "rt-threaded")]
-        State::ThreadPool(thread_pool_ptr) => {
-            let thread_pool = unsafe { &*thread_pool_ptr };
-            thread_pool.spawn(future)
-        }
-        State::Basic(basic_scheduler_ptr) => {
-            let basic_scheduler = unsafe { &*basic_scheduler_ptr };
+    ThreadContext::with_executor(|state| {
+        match *state {
+            #[cfg(feature = "rt-threaded")]
+            State::ThreadPool(thread_pool_ptr) => {
+                let thread_pool = unsafe { &*thread_pool_ptr };
+                thread_pool.spawn(future)
+            }
+            State::Basic(basic_scheduler_ptr) => {
+                let basic_scheduler = unsafe { &*basic_scheduler_ptr };
 
-            // Safety: The `BasicScheduler` value set the thread-local (same
-            // thread).
-            unsafe { basic_scheduler.spawn(future) }
-        }
-        State::Empty => {
-            // Explicit drop of `future` silences the warning that `future` is
-            // not used when neither rt-* feature flags are enabled.
-            drop(future);
-            panic!("must be called from the context of Tokio runtime configured with either `basic_scheduler` or `threaded_scheduler`");
+                // Safety: The `BasicScheduler` value set the thread-local (same
+                // thread).
+                unsafe { basic_scheduler.spawn(future) }
+            }
+            State::Empty => {
+                // Explicit drop of `future` silences the warning that `future` is
+                // not used when neither rt-* feature flags are enabled.
+                drop(future);
+                panic!("must be called from the context of Tokio runtime configured with either `basic_scheduler` or `threaded_scheduler`");
+            }
         }
     })
 }
@@ -59,10 +55,10 @@ pub(super) fn with_basic_scheduler<F, R>(
 where
     F: FnOnce() -> R,
 {
-    with_state(
-        State::Basic(basic_scheduler as *const basic_scheduler::SchedulerPriv),
-        f,
-    )
+    let _guard = ThreadContext::set_default_executor(State::Basic(
+        basic_scheduler as *const basic_scheduler::SchedulerPriv,
+    ));
+    f()
 }
 
 cfg_rt_threaded! {
@@ -72,31 +68,7 @@ cfg_rt_threaded! {
     where
         F: FnOnce() -> R,
     {
-        with_state(State::ThreadPool(thread_pool as *const _), f)
-    }
-}
-
-fn with_state<F, R>(state: State, f: F) -> R
-where
-    F: FnOnce() -> R,
-{
-    EXECUTOR.with(|cell| {
-        let was = cell.replace(State::Empty);
-
-        // Ensure that the executor is removed from the thread-local context
-        // when leaving the scope. This handles cases that involve panicking.
-        struct Reset<'a>(&'a Cell<State>, State);
-
-        impl Drop for Reset<'_> {
-            fn drop(&mut self) {
-                self.0.set(self.1);
-            }
-        }
-
-        let _reset = Reset(cell, was);
-
-        cell.set(state);
-
+        let _guard = ThreadContext::set_default_executor(State::ThreadPool(thread_pool as *const thread_pool::Spawner));
         f()
-    })
+    }
 }

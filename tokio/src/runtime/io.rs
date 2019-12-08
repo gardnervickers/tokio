@@ -11,7 +11,10 @@ pub(crate) use variant::*;
 #[cfg(all(feature = "io-driver", not(loom)))]
 mod variant {
     use crate::io::driver;
-    use crate::park::{Either, ParkThread};
+    use crate::{
+        park::{Either, ParkThread},
+        runtime::context::ReactorGuard,
+    };
 
     use std::io;
 
@@ -39,7 +42,7 @@ mod variant {
         }
     }
 
-    pub(crate) fn set_default(handle: &Handle) -> Option<driver::DefaultGuard<'_>> {
+    pub(crate) fn set_default(handle: &Handle) -> Option<ReactorGuard> {
         handle.as_ref().map(|handle| driver::set_default(handle))
     }
 }

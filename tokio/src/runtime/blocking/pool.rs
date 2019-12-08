@@ -2,13 +2,13 @@
 
 use crate::loom::sync::{Arc, Condvar, Mutex};
 use crate::loom::thread;
-use crate::runtime::{self, io, time, Builder, Callback};
-use crate::runtime::blocking::shutdown;
 use crate::runtime::blocking::schedule::NoopSchedule;
+use crate::runtime::blocking::shutdown;
 use crate::runtime::blocking::task::BlockingTask;
+use crate::runtime::context::ThreadContext;
+use crate::runtime::{self, io, time, Builder, Callback};
 use crate::task::{self, JoinHandle};
 
-use std::cell::Cell;
 use std::collections::VecDeque;
 use std::fmt;
 use std::time::Duration;
@@ -67,11 +67,6 @@ struct Shared {
 
 type Task = task::Task<NoopSchedule>;
 
-thread_local! {
-    /// Thread-local tracking the current executor
-    static BLOCKING: Cell<Option<*const Spawner>> = Cell::new(None)
-}
-
 const MAX_THREADS: u32 = 1_000;
 const KEEP_ALIVE: Duration = Duration::from_secs(10);
 
@@ -80,9 +75,9 @@ pub(crate) fn spawn_blocking<F, R>(func: F) -> JoinHandle<R>
 where
     F: FnOnce() -> R + Send + 'static,
 {
-    BLOCKING.with(|cell| {
-        let schedule = match cell.get() {
-            Some(ptr) => unsafe { &*ptr },
+    ThreadContext::with_blocking_pool(|pool| {
+        let schedule = match pool {
+            Some(ptr) => unsafe { &**ptr },
             None => panic!("not currently running on the Tokio runtime."),
         };
 
@@ -173,23 +168,8 @@ impl Spawner {
         // Because we are always clearing the TLS value at the end of the
         // function, we can cast the reference to 'static which thread-local
         // cells require.
-        BLOCKING.with(|cell| {
-            let was = cell.replace(None);
-
-            // Ensure that the pool is removed from the thread-local context
-            // when leaving the scope. This handles cases that involve panicking.
-            struct Reset<'a>(&'a Cell<Option<*const Spawner>>, Option<*const Spawner>);
-
-            impl Drop for Reset<'_> {
-                fn drop(&mut self) {
-                    self.0.set(self.1);
-                }
-            }
-
-            let _reset = Reset(cell, was);
-            cell.set(Some(self as *const Spawner));
-            f()
-        })
+        let _guard = ThreadContext::set_default_blocking_pool(self as *const Spawner);
+        f()
     }
 
     fn schedule(&self, task: Task) {

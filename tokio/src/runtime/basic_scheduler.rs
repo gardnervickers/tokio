@@ -1,11 +1,12 @@
 use crate::park::{Park, Unpark};
-use crate::task::{self, queue::MpscQueues, JoinHandle, Schedule, ScheduleSendOnly, Task};
+use crate::{
+    runtime::context::ThreadContext,
+    task::{self, queue::MpscQueues, JoinHandle, Schedule, ScheduleSendOnly, Task},
+};
 
-use std::cell::Cell;
 use std::fmt;
 use std::future::Future;
 use std::mem::ManuallyDrop;
-use std::ptr;
 use std::sync::Arc;
 use std::task::{RawWaker, RawWakerVTable, Waker};
 use std::time::Duration;
@@ -50,10 +51,6 @@ struct LocalState<P> {
 
 /// Max number of tasks to poll per tick.
 const MAX_TASKS_PER_TICK: usize = 61;
-
-thread_local! {
-    static ACTIVE: Cell<*const SchedulerPriv> = Cell::new(ptr::null())
-}
 
 impl<P> BasicScheduler<P>
 where
@@ -100,24 +97,8 @@ where
         let local = &mut self.local;
         let scheduler = &*self.scheduler;
 
-        struct Guard {
-            old: *const SchedulerPriv,
-        }
-
-        impl Drop for Guard {
-            fn drop(&mut self) {
-                ACTIVE.with(|cell| cell.set(self.old));
-            }
-        }
-
         // Track the current scheduler
-        let _guard = ACTIVE.with(|cell| {
-            let guard = Guard { old: cell.get() };
-
-            cell.set(scheduler as *const SchedulerPriv);
-
-            guard
-        });
+        let _guard = ThreadContext::set_default_scheduler(scheduler as *const SchedulerPriv);
 
         runtime::global::with_basic_scheduler(scheduler, || {
             let mut _enter = runtime::enter();
@@ -260,7 +241,13 @@ impl Schedule for SchedulerPriv {
     }
 
     fn schedule(&self, task: Task<Self>) {
-        let is_current = ACTIVE.with(|cell| cell.get() == self as *const SchedulerPriv);
+        let is_current = ThreadContext::with_scheduler(|scheduler| {
+            if let Some(scheduler) = scheduler {
+                *scheduler == self as *const SchedulerPriv
+            } else {
+                false
+            }
+        });
 
         if is_current {
             unsafe {

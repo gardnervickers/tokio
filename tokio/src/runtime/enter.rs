@@ -1,8 +1,7 @@
-use std::cell::{Cell, RefCell};
+use crate::runtime::context::ThreadContext;
+use std::cell::RefCell;
 use std::fmt;
 use std::marker::PhantomData;
-
-thread_local!(static ENTERED: Cell<bool> = Cell::new(false));
 
 /// Represents an executor context.
 ///
@@ -29,14 +28,12 @@ pub(crate) fn enter() -> Enter {
 /// Tries to enter a runtime context, returns `None` if already in a runtime
 /// context.
 pub(crate) fn try_enter() -> Option<Enter> {
-    ENTERED.with(|c| {
-        if c.get() {
-            None
-        } else {
-            c.set(true);
-            Some(Enter { _p: PhantomData })
-        }
-    })
+    if ThreadContext::entered() {
+        None
+    } else {
+        ThreadContext::set_entered(true);
+        Some(Enter { _p: PhantomData })
+    }
 }
 
 // Forces the current "entered" state to be cleared while the closure
@@ -52,25 +49,21 @@ pub(crate) fn exit<F: FnOnce() -> R, R>(f: F) -> R {
     struct Reset;
     impl Drop for Reset {
         fn drop(&mut self) {
-            ENTERED.with(|c| {
-                c.set(true);
-            });
+            ThreadContext::set_entered(true);
         }
     }
-
-    ENTERED.with(|c| {
-        debug_assert!(c.get());
-        c.set(false);
-    });
+    debug_assert!(ThreadContext::entered());
+    ThreadContext::set_entered(false);
 
     let reset = Reset;
     let ret = f();
     ::std::mem::forget(reset);
 
-    ENTERED.with(|c| {
-        assert!(!c.get(), "closure claimed permanent executor");
-        c.set(true);
-    });
+    assert!(
+        !ThreadContext::entered(),
+        "closure claimed permanent executor"
+    );
+    ThreadContext::set_entered(true);
 
     ret
 }
@@ -114,9 +107,7 @@ impl fmt::Debug for Enter {
 
 impl Drop for Enter {
     fn drop(&mut self) {
-        ENTERED.with(|c| {
-            assert!(c.get());
-            c.set(false);
-        });
+        assert!(ThreadContext::entered());
+        ThreadContext::set_entered(false);
     }
 }

@@ -7,13 +7,12 @@ use crate::loom::sync::atomic::AtomicUsize;
 use crate::park::{Park, Unpark};
 use crate::util::slab::{Address, Slab};
 
+use crate::runtime::context::{ReactorGuard, ThreadContext};
 use mio::event::Evented;
-use std::cell::RefCell;
 use std::fmt;
 use std::io;
-use std::marker::PhantomData;
-use std::sync::{Arc, Weak};
 use std::sync::atomic::Ordering::SeqCst;
+use std::sync::{Arc, Weak};
 use std::task::Waker;
 use std::time::Duration;
 
@@ -54,11 +53,6 @@ pub(super) enum Direction {
     Write,
 }
 
-thread_local! {
-    /// Tracks the reactor for the current execution context.
-    static CURRENT_REACTOR: RefCell<Option<Handle>> = RefCell::new(None)
-}
-
 const TOKEN_WAKEUP: mio::Token = mio::Token(Address::NULL);
 
 fn _assert_kinds() {
@@ -69,38 +63,16 @@ fn _assert_kinds() {
 
 // ===== impl Driver =====
 
-#[derive(Debug)]
-/// Guard that resets current reactor on drop.
-pub(crate) struct DefaultGuard<'a> {
-    _lifetime: PhantomData<&'a u8>,
-}
-
-impl Drop for DefaultGuard<'_> {
-    fn drop(&mut self) {
-        CURRENT_REACTOR.with(|current| {
-            let mut current = current.borrow_mut();
-            *current = None;
-        });
-    }
-}
-
 /// Sets handle for a default reactor, returning guard that unsets it on drop.
-pub(crate) fn set_default(handle: &Handle) -> DefaultGuard<'_> {
-    CURRENT_REACTOR.with(|current| {
-        let mut current = current.borrow_mut();
-
+pub(crate) fn set_default(handle: &Handle) -> ReactorGuard {
+    ThreadContext::with_reactor(|current| {
         assert!(
             current.is_none(),
             "default Tokio reactor already set \
              for execution context"
         );
-
-        *current = Some(handle.clone());
     });
-
-    DefaultGuard {
-        _lifetime: PhantomData,
-    }
+    ThreadContext::set_default_reactor(handle.clone())
 }
 
 impl Driver {
@@ -238,7 +210,7 @@ impl Handle {
     ///
     /// This function panics if there is no current reactor set.
     pub(super) fn current() -> Self {
-        CURRENT_REACTOR.with(|current| match *current.borrow() {
+        ThreadContext::with_reactor(|reactor| match reactor {
             Some(ref handle) => handle.clone(),
             None => panic!("no current reactor"),
         })

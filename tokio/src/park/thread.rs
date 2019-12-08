@@ -5,7 +5,7 @@ use crate::park::{Park, Unpark};
 use std::sync::atomic::Ordering::SeqCst;
 use std::time::Duration;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct ParkThread {
     inner: Arc<Inner>,
 }
@@ -36,10 +36,6 @@ struct Inner {
 const EMPTY: usize = 0;
 const PARKED: usize = 1;
 const NOTIFIED: usize = 2;
-
-thread_local! {
-    static CURRENT_PARKER: ParkThread = ParkThread::new();
-}
 
 // ==== impl ParkThread ====
 
@@ -211,6 +207,7 @@ impl Unpark for UnparkThread {
 cfg_blocking_impl! {
     use std::marker::PhantomData;
     use std::rc::Rc;
+    use crate::runtime::context::ThreadContext;
 
     use std::mem;
     use std::task::{RawWaker, RawWakerVTable, Waker};
@@ -237,7 +234,7 @@ cfg_blocking_impl! {
         where
             F: FnOnce(&ParkThread) -> R,
         {
-            CURRENT_PARKER.with(|inner| f(inner))
+            ThreadContext::with_parker(|parker| f(parker))
         }
     }
 
