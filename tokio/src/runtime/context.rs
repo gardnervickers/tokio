@@ -14,10 +14,10 @@ cfg_rt_core! {
     use crate::runtime::global::State as ExecutorState;
 }
 
-cfg_time! {
-    use crate::time::driver::Handle as TimerHandle;
-    use crate::time::Clock;
-}
+#[cfg(all(feature = "time", not(loom)))]
+use crate::time::driver::Handle as TimerHandle;
+#[cfg(all(feature = "time", not(loom)))]
+use crate::time::Clock;
 
 use std::cell::RefCell;
 
@@ -35,9 +35,9 @@ pub(crate) struct ThreadContext {
     executor: ExecutorState,
     #[cfg(feature = "rt-core")]
     scheduler: Option<*const SchedulerPriv>,
-    #[cfg(feature = "time")]
+    #[cfg(all(feature = "time", not(loom)))]
     timer: Option<TimerHandle>,
-    #[cfg(feature = "time")]
+    #[cfg(all(feature = "time", not(loom)))]
     clock: Option<*const Clock>,
     #[cfg(any( // cfg_blocking_impl features
         feature = "blocking",
@@ -85,7 +85,7 @@ impl ThreadContext {
         CONTEXT.with(|ctx| ctx.borrow().entered)
     }
 
-    #[cfg(feature = "time")]
+    #[cfg(all(feature = "time", not(loom)))]
     pub(crate) fn set_default_clock(clock: *const Clock) -> ClockGuard {
         CONTEXT.with(|ctx| {
             let mut ctx = ctx.borrow_mut();
@@ -93,7 +93,8 @@ impl ThreadContext {
             ClockGuard(was)
         })
     }
-    #[cfg(feature = "time")]
+
+    #[cfg(all(feature = "time", not(loom)))]
     pub(crate) fn with_clock<F, U>(f: F) -> U
     where
         F: FnOnce(&Option<*const Clock>) -> U,
@@ -159,7 +160,7 @@ impl ThreadContext {
         CONTEXT.with(|ctx| f(&ctx.borrow().scheduler))
     }
 
-    #[cfg(feature = "time")]
+    #[cfg(all(feature = "time", not(loom)))]
     pub(crate) fn set_default_timer(handle: TimerHandle) -> TimerGuard {
         CONTEXT.with(|ctx| {
             let mut ctx = ctx.borrow_mut();
@@ -168,7 +169,7 @@ impl ThreadContext {
         })
     }
 
-    #[cfg(feature = "time")]
+    #[cfg(all(feature = "time", not(loom)))]
     pub(crate) fn with_timer<F, U>(f: F) -> U
     where
         F: FnOnce(&Option<TimerHandle>) -> U,
@@ -254,36 +255,37 @@ cfg_rt_core! {
     }
 }
 
-cfg_time! {
-    #[derive(Debug)]
-    /// Guard that resets the current clock on drop.
-    pub(crate) struct ClockGuard(Option<*const Clock>);
-    impl Drop for ClockGuard {
-        fn drop(&mut self) {
-            CONTEXT.with(|ctx| {
-                if let Some(clock) = self.0.take() {
-                    ctx.borrow_mut().clock.replace(clock);
-                } else {
-                    ctx.borrow_mut().clock.take();
-                }
-            })
-        }
+#[cfg(all(feature = "time", not(loom)))]
+#[derive(Debug)]
+/// Guard that resets the current clock on drop.
+pub(crate) struct ClockGuard(Option<*const Clock>);
+#[cfg(all(feature = "time", not(loom)))]
+impl Drop for ClockGuard {
+    fn drop(&mut self) {
+        CONTEXT.with(|ctx| {
+            if let Some(clock) = self.0.take() {
+                ctx.borrow_mut().clock.replace(clock);
+            } else {
+                ctx.borrow_mut().clock.take();
+            }
+        })
     }
+}
 
-
-    #[derive(Debug)]
-    /// Guard that resets the current timer handle on drop.
-    pub(crate) struct TimerGuard(Option<TimerHandle>);
-    impl Drop for TimerGuard {
-        fn drop(&mut self) {
-            CONTEXT.with(|ctx| {
-                if let Some(timer) = self.0.take() {
-                    ctx.borrow_mut().timer.replace(timer);
-                } else {
-                    ctx.borrow_mut().timer.take();
-                }
-            })
-        }
+#[cfg(all(feature = "time", not(loom)))]
+#[derive(Debug)]
+/// Guard that resets the current timer handle on drop.
+pub(crate) struct TimerGuard(Option<TimerHandle>);
+#[cfg(all(feature = "time", not(loom)))]
+impl Drop for TimerGuard {
+    fn drop(&mut self) {
+        CONTEXT.with(|ctx| {
+            if let Some(timer) = self.0.take() {
+                ctx.borrow_mut().timer.replace(timer);
+            } else {
+                ctx.borrow_mut().timer.take();
+            }
+        })
     }
 }
 
