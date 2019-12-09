@@ -60,9 +60,9 @@ impl ThreadContext {
             executor: ExecutorState::Empty,
             #[cfg(feature = "rt-core")]
             scheduler: None,
-            #[cfg(feature = "time")]
+            #[cfg(all(feature = "time", not(loom)))]
             timer: None,
-            #[cfg(feature = "time")]
+            #[cfg(all(feature = "time", not(loom)))]
             clock: None,
             #[cfg(any( // cfg_blocking_impl features
                 feature = "blocking",
