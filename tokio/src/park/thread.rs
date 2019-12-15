@@ -20,6 +20,12 @@ pub(crate) struct ParkError {
     _p: (),
 }
 
+impl From<ParkError> for std::io::Error {
+    fn from(_: ParkError) -> Self {
+        unimplemented!()
+    }
+}
+
 /// Unblocks a thread that was blocked by `ParkThread`.
 #[derive(Clone, Debug)]
 pub(crate) struct UnparkThread {

@@ -196,20 +196,5 @@ cfg_test_util! {
             })
         }
 
-        /// Set the clock as the default source of time for the duration of the
-        /// closure
-        pub(crate) fn enter<F, R>(&self, f: F) -> R
-        where
-            F: FnOnce() -> R,
-        {
-            ThreadContext::with_clock(|clock| {
-                assert!(
-                    clock.is_none(),
-                    "default clock already set for execution context"
-                );
-            });
-            let _guard = ThreadContext::set_default_clock(self as *const Clock);
-            f()
-        }
     }
 }

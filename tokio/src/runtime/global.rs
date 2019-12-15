@@ -13,7 +13,7 @@ pub(super) enum State {
 
     // default executor is a thread pool instance.
     #[cfg(feature = "rt-threaded")]
-    ThreadPool(*const thread_pool::Spawner),
+    ThreadPool(*const crate::runtime::thread_pool::Spawner),
 }
 
 // ===== global spawn fns =====
@@ -46,29 +46,4 @@ where
             }
         }
     })
-}
-
-pub(super) fn with_basic_scheduler<F, R>(
-    basic_scheduler: &basic_scheduler::SchedulerPriv,
-    f: F,
-) -> R
-where
-    F: FnOnce() -> R,
-{
-    let _guard = ThreadContext::set_default_executor(State::Basic(
-        basic_scheduler as *const basic_scheduler::SchedulerPriv,
-    ));
-    f()
-}
-
-cfg_rt_threaded! {
-    use crate::runtime::thread_pool;
-
-    pub(super) fn with_thread_pool<F, R>(thread_pool: &thread_pool::Spawner, f: F) -> R
-    where
-        F: FnOnce() -> R,
-    {
-        let _guard = ThreadContext::set_default_executor(State::ThreadPool(thread_pool as *const thread_pool::Spawner));
-        f()
-    }
 }

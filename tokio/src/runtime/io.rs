@@ -18,11 +18,6 @@ mod variant {
 
     use std::io;
 
-    /// The driver value the runtime passes to the `timer` layer.
-    ///
-    /// When the `io-driver` feature is enabled, this is the "real" I/O driver
-    /// backed by Mio. Without the `io-driver` feature, this is a thread parker
-    /// backed by a condition variable.
     pub(crate) type Driver = Either<driver::Driver, ParkThread>;
 
     /// The handle the runtime stores for future use.
@@ -43,7 +38,9 @@ mod variant {
     }
 
     pub(crate) fn set_default(handle: &Handle) -> Option<ReactorGuard> {
-        handle.as_ref().map(|handle| driver::set_default(handle))
+        handle
+            .clone()
+            .map(crate::runtime::context::ThreadContext::set_default_reactor)
     }
 }
 

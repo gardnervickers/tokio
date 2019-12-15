@@ -7,7 +7,7 @@ use crate::loom::sync::atomic::AtomicUsize;
 use crate::park::{Park, Unpark};
 use crate::util::slab::{Address, Slab};
 
-use crate::runtime::context::{ReactorGuard, ThreadContext};
+use crate::runtime::context::ThreadContext;
 use mio::event::Evented;
 use std::fmt;
 use std::io;
@@ -62,18 +62,6 @@ fn _assert_kinds() {
 }
 
 // ===== impl Driver =====
-
-/// Sets handle for a default reactor, returning guard that unsets it on drop.
-pub(crate) fn set_default(handle: &Handle) -> ReactorGuard {
-    ThreadContext::with_reactor(|current| {
-        assert!(
-            current.is_none(),
-            "default Tokio reactor already set \
-             for execution context"
-        );
-    });
-    ThreadContext::set_default_reactor(handle.clone())
-}
 
 impl Driver {
     /// Creates a new event loop, returning any error that happened during the

@@ -182,7 +182,8 @@
 //! [runtime builder]: crate::runtime::Builder
 //! [`Runtime::new`]: crate::runtime::Runtime::new
 //! [`Builder::basic_scheduler`]: crate::runtime::Builder::basic_scheduler
-//! [`Builder::threaded_scheduler`]: crate::runtime::Builder::threaded_scheduler
+//! [`Builder:
+//! :threaded_scheduler`]: crate::runtime::Builder::threaded_scheduler
 //! [`Builder::enable_io`]: crate::runtime::Builder::enable_io
 //! [`Builder::enable_time`]: crate::runtime::Builder::enable_time
 //! [`Builder::enable_all`]: crate::runtime::Builder::enable_all
@@ -290,7 +291,7 @@ pub struct Runtime {
 enum Kind {
     /// Not able to execute concurrent tasks. This variant is mostly used to get
     /// access to the driver handles.
-    Shell(Shell),
+    Shell(Shell<time::Driver>),
 
     /// Execute all tasks on the current-thread.
     #[cfg(feature = "rt-core")]
@@ -448,5 +449,214 @@ impl Runtime {
     /// ```
     pub fn handle(&self) -> &Handle {
         &self.handle
+    }
+}
+
+// ============== new impls ============== //
+
+pub(crate) enum TimeDriver<T> {
+    Enabled(crate::time::driver::Driver<T>),
+    Disabled(T),
+}
+
+impl<T> TimeDriver<T>
+where
+    T: crate::park::Park,
+{
+    #[cfg(all(feature = "time", not(loom)))]
+    fn create_clock() -> crate::time::Clock {
+        crate::time::Clock::new()
+    }
+
+    #[cfg(all(feature = "time", not(loom)))]
+    fn new(enabled: bool, io_driver: T) -> Self {
+        if enabled {
+            let driver = crate::time::driver::Driver::new(io_driver, Self::create_clock());
+            Self::Enabled(driver)
+        } else {
+            Self::Disabled(io_driver)
+        }
+    }
+
+    fn handle(&self) -> Option<crate::time::driver::Handle> {
+        match self {
+            TimeDriver::Enabled(inner) => Some(inner.handle()),
+            TimeDriver::Disabled(_) => None,
+        }
+    }
+}
+
+impl<P> crate::park::Park for TimeDriver<P>
+where
+    P: crate::park::Park,
+{
+    type Unpark = P::Unpark;
+    type Error = P::Error;
+    fn unpark(&self) -> Self::Unpark {
+        match self {
+            TimeDriver::Enabled(p) => p.unpark(),
+            TimeDriver::Disabled(p) => p.unpark(),
+        }
+    }
+    fn park(&mut self) -> Result<(), Self::Error> {
+        match self {
+            TimeDriver::Enabled(p) => p.park(),
+            TimeDriver::Disabled(p) => p.park(),
+        }
+    }
+    fn park_timeout(&mut self, duration: std::time::Duration) -> Result<(), Self::Error> {
+        match self {
+            TimeDriver::Enabled(p) => p.park_timeout(duration),
+            TimeDriver::Disabled(p) => p.park_timeout(duration),
+        }
+    }
+}
+
+/// The driver value the runtime passes to the `timer` layer.
+///
+/// When the `io-driver` feature is enabled, this is the "real" I/O driver
+/// backed by Mio. Without the `io-driver` feature, this is a thread parker
+/// backed by a condition variable.
+#[derive(Debug)]
+pub(crate) enum IoDriver {
+    #[cfg(all(feature = "io-driver", not(loom)))]
+    Enabled(crate::io::driver::Driver),
+    Disabled(crate::park::ParkThread),
+}
+
+impl IoDriver {
+    #[cfg(all(feature = "io-driver", not(loom)))]
+    fn new(enabled: bool) -> io::Result<Self> {
+        if enabled {
+            let driver = crate::io::driver::Driver::new()?;
+            Ok(Self::Enabled(driver))
+        } else {
+            let driver = crate::park::ParkThread::new();
+            Ok(Self::Disabled(driver))
+        }
+    }
+    #[cfg(any(not(feature = "io-driver"), loom))]
+    fn new(_enabled: bool) -> io::Result<Self> {
+        Ok(Self::Disabled(crate::park::ParkThread::new()))
+    }
+
+    fn handle(&self) -> Option<crate::io::driver::Handle> {
+        match self {
+            IoDriver::Enabled(inner) => Some(inner.handle()),
+            IoDriver::Disabled(_) => None,
+        }
+    }
+}
+
+pub(crate) enum IoDriverUnpark {
+    Enabled(crate::io::driver::Handle),
+    Disabled(crate::park::UnparkThread),
+}
+
+impl crate::park::Unpark for IoDriverUnpark {
+    fn unpark(&self) {
+        match self {
+            IoDriverUnpark::Enabled(p) => p.unpark(),
+            IoDriverUnpark::Disabled(p) => p.unpark(),
+        }
+    }
+}
+
+impl crate::park::Park for IoDriver {
+    type Unpark = IoDriverUnpark;
+    type Error = std::io::Error;
+    fn unpark(&self) -> Self::Unpark {
+        match self {
+            IoDriver::Enabled(p) => IoDriverUnpark::Enabled(p.unpark()),
+            IoDriver::Disabled(p) => IoDriverUnpark::Disabled(p.unpark()),
+        }
+    }
+    fn park(&mut self) -> Result<(), Self::Error> {
+        match self {
+            IoDriver::Enabled(p) => p.park(),
+            IoDriver::Disabled(p) => p.park().map_err(Into::into),
+        }
+    }
+    fn park_timeout(&mut self, duration: std::time::Duration) -> Result<(), Self::Error> {
+        match self {
+            IoDriver::Enabled(p) => p.park_timeout(duration),
+            IoDriver::Disabled(p) => p.park_timeout(duration).map_err(Into::into),
+        }
+    }
+}
+
+pub(crate) enum Kind2 {
+    Shell,
+    Basic,
+    ThreadPool,
+}
+
+/// The runtime executor is either a thread-pool or a current-thread executor.
+#[derive(Debug)]
+enum Kind3<P>
+where
+    P: crate::park::Park,
+{
+    /// Not able to execute concurrent tasks. This variant is mostly used to get
+    /// access to the driver handles.
+    Shell(Shell<P>),
+
+    /// Execute all tasks on the current-thread.
+    #[cfg(feature = "rt-core")]
+    Basic(BasicScheduler<P>),
+
+    /// Execute tasks across multiple threads.
+    #[cfg(feature = "rt-threaded")]
+    ThreadPool(ThreadPool),
+}
+
+struct Runtime2<P>
+where
+    P: crate::park::Park,
+{
+    runtime: Kind3<P>,
+}
+
+impl Runtime2<TimeDriver<IoDriver>> {
+    pub(crate) fn new(
+        kind: Kind2,
+        enable_io_driver: bool,
+        enable_timer_driver: bool,
+    ) -> io::Result<Self> {
+        let io_driver = IoDriver::new(enable_io_driver)?;
+        let io_driver_handle = io_driver.handle();
+        let time_driver = TimeDriver::new(enable_timer_driver, io_driver);
+        let time_driver_handle = time_driver.handle();
+        let runtime = match kind {
+            Kind2::Shell => Kind3::Shell(Shell::new(time_driver)),
+            Kind2::Basic => Kind3::Basic(BasicScheduler::new(time_driver)),
+            Kind2::ThreadPool => unimplemented!(),
+        };
+
+        Ok(Self { runtime })
+    }
+
+    fn block_on<F>(&mut self, future: F) -> F::Output
+    where
+        F: Future,
+    {
+        match self.runtime {
+            Kind3::Shell(ref mut rt) => rt.block_on(future),
+            Kind3::Basic(ref mut rt) => rt.block_on(future),
+            Kind3::ThreadPool(ref mut rt) => rt.block_on(future),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests2 {
+    use super::*;
+
+    #[test]
+    fn smoke_test() {
+        let mut runtime = super::Runtime2::new(Kind2::Shell, false, false).unwrap();
+        runtime.block_on(async {
+            println!("HI");
+        });
     }
 }

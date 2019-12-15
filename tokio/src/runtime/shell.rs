@@ -10,8 +10,8 @@ use std::task::Poll::Ready;
 use std::task::{Context, RawWaker, RawWakerVTable, Waker};
 
 #[derive(Debug)]
-pub(super) struct Shell {
-    driver: time::Driver,
+pub(super) struct Shell<P> {
+    driver: P,
 
     /// TODO: don't store this
     waker: Waker,
@@ -19,10 +19,14 @@ pub(super) struct Shell {
 
 type Handle = <time::Driver as Park>::Unpark;
 
-impl Shell {
-    pub(super) fn new(driver: time::Driver) -> Shell {
+impl<P> Shell<P>
+where
+    P: Park,
+    <P as Park>::Error: std::fmt::Debug,
+{
+    pub(super) fn new(driver: P) -> Shell<P> {
         // Make sure we don't mess up types (as we do casts later)
-        let unpark: Arc<Handle> = Arc::new(driver.unpark());
+        let unpark = Arc::new(driver.unpark());
 
         let raw_waker = RawWaker::new(
             Arc::into_raw(unpark) as *const Handle as *const (),

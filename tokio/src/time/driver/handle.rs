@@ -1,4 +1,4 @@
-use crate::runtime::context::{ThreadContext, TimerGuard};
+use crate::runtime::context::ThreadContext;
 use crate::time::driver::Inner;
 use std::fmt;
 use std::sync::{Arc, Weak};
@@ -7,15 +7,6 @@ use std::sync::{Arc, Weak};
 #[derive(Clone)]
 pub(crate) struct Handle {
     inner: Weak<Inner>,
-}
-
-/// Sets handle to default timer, returning guard that unsets it on drop.
-///
-/// # Panics
-///
-/// This function panics if there already is a default timer set.
-pub(crate) fn set_default(handle: &Handle) -> TimerGuard {
-    ThreadContext::set_default_timer(handle.clone())
 }
 
 impl Handle {

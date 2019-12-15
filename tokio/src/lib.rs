@@ -11,7 +11,7 @@
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
-
+#![allow(dead_code, unused_variables)]
 //! A runtime for writing reliable, asynchronous, and slim applications.
 //!
 //! Tokio is an event-driven, non-blocking I/O platform for writing asynchronous

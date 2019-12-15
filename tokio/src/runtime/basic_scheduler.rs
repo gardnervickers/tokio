@@ -1,6 +1,6 @@
 use crate::park::{Park, Unpark};
 use crate::{
-    runtime::context::ThreadContext,
+    runtime::{context::ThreadContext, global},
     task::{self, queue::MpscQueues, JoinHandle, Schedule, ScheduleSendOnly, Task},
 };
 
@@ -99,38 +99,38 @@ where
 
         // Track the current scheduler
         let _guard = ThreadContext::set_default_scheduler(scheduler as *const SchedulerPriv);
+        let _executor_guard = ThreadContext::set_default_executor(
+            crate::runtime::global::State::Basic(scheduler as *const SchedulerPriv),
+        );
+        let mut _enter = runtime::enter();
 
-        runtime::global::with_basic_scheduler(scheduler, || {
-            let mut _enter = runtime::enter();
+        let raw_waker = RawWaker::new(
+            scheduler as *const SchedulerPriv as *const (),
+            &RawWakerVTable::new(sched_clone_waker, sched_noop, sched_wake_by_ref, sched_noop),
+        );
 
-            let raw_waker = RawWaker::new(
-                scheduler as *const SchedulerPriv as *const (),
-                &RawWakerVTable::new(sched_clone_waker, sched_noop, sched_wake_by_ref, sched_noop),
-            );
+        let waker = ManuallyDrop::new(unsafe { Waker::from_raw(raw_waker) });
+        let mut cx = Context::from_waker(&waker);
 
-            let waker = ManuallyDrop::new(unsafe { Waker::from_raw(raw_waker) });
-            let mut cx = Context::from_waker(&waker);
+        // `block_on` takes ownership of `f`. Once it is pinned here, the
+        // original `f` binding can no longer be accessed, making the
+        // pinning safe.
+        let mut future = unsafe { Pin::new_unchecked(&mut future) };
 
-            // `block_on` takes ownership of `f`. Once it is pinned here, the
-            // original `f` binding can no longer be accessed, making the
-            // pinning safe.
-            let mut future = unsafe { Pin::new_unchecked(&mut future) };
-
-            loop {
-                if let Ready(v) = future.as_mut().poll(&mut cx) {
-                    return v;
-                }
-
-                scheduler.tick(local);
-
-                // Maintenance work
-                unsafe {
-                    // safety: this function is safe to call only from the
-                    // thread the basic scheduler is running on (which we are).
-                    scheduler.queues.drain_pending_drop();
-                }
+        loop {
+            if let Ready(v) = future.as_mut().poll(&mut cx) {
+                return v;
             }
-        })
+
+            scheduler.tick(local);
+
+            // Maintenance work
+            unsafe {
+                // safety: this function is safe to call only from the
+                // thread the basic scheduler is running on (which we are).
+                scheduler.queues.drain_pending_drop();
+            }
+        }
     }
 }
 
@@ -151,8 +151,10 @@ impl Spawner {
     where
         F: FnOnce() -> R,
     {
-        use crate::runtime::global;
-        global::with_basic_scheduler(&*self.scheduler, f)
+        let _executor_guard = ThreadContext::set_default_executor(global::State::Basic(
+            &*self.scheduler as *const SchedulerPriv,
+        ));
+        f()
     }
 }
 

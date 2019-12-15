@@ -53,7 +53,6 @@ struct Inner {
 
     /// Source of `Instant::now()`
     clock: time::Clock,
-
 }
 
 struct Shared {
@@ -241,10 +240,18 @@ impl Spawner {
 impl Inner {
     fn run(&self) {
         let _io = io::set_default(&self.io_handle);
-
-        time::with_default(&self.time_handle, &self.clock, || {
-            self.spawner.enter(|| self.run2());
+        let _timer_guard = self
+            .time_handle
+            .clone()
+            .map(ThreadContext::set_default_timer);
+        ThreadContext::with_clock(|clock| {
+            assert!(
+                clock.is_none(),
+                "default clock already set for execution context"
+            );
         });
+        let _guard = ThreadContext::set_default_clock(&self.clock as *const time::Clock);
+        self.spawner.enter(|| self.run2());
     }
 
     fn run2(&self) {

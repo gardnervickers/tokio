@@ -1,4 +1,5 @@
 use crate::loom::sync::Arc;
+use crate::runtime::context::ThreadContext;
 use crate::runtime::thread_pool::slice;
 use crate::task::JoinHandle;
 
@@ -41,7 +42,10 @@ impl Spawner {
     where
         F: FnOnce() -> R,
     {
-        crate::runtime::global::with_thread_pool(self, f)
+        let _guard = ThreadContext::set_default_executor(
+            crate::runtime::global::State::ThreadPool(self as *const Spawner),
+        );
+        f()
     }
 
     /// Reference to the worker set. Used by `ThreadPool` to initiate shutdown.

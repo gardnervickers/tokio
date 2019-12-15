@@ -1,7 +1,8 @@
 use crate::park::{Park, Unpark};
-use crate::time::driver::{self, Driver};
+use crate::time::driver::Driver;
 use crate::time::{Clock, Duration, Instant};
 
+use crate::runtime::context::ThreadContext;
 use std::marker::PhantomData;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
@@ -78,18 +79,22 @@ impl MockClock {
     where
         F: FnOnce(&mut Handle) -> R,
     {
-        self.clock.enter(|| {
-            let park = self.time.mock_park();
-            let timer = Driver::new(park, self.clock.clone());
-            let handle = timer.handle();
-            let _e = driver::set_default(&handle);
+        ThreadContext::with_clock(|clock| {
+            assert!(
+                clock.is_none(),
+                "default clock already set for execution context"
+            );
+        });
+        let _guard = ThreadContext::set_default_clock(&self.clock as *const Clock);
+        let park = self.time.mock_park();
+        let timer = Driver::new(park, self.clock.clone());
+        let handle = timer.handle();
 
-            let time = self.time.clone();
+        let _timer_guard = ThreadContext::set_default_timer(handle);
+        let time = self.time.clone();
 
-            let mut handle = Handle::new(timer, time, self.clock.clone());
-            f(&mut handle)
-            // lazy(|| Ok::<_, ()>(f(&mut handle))).wait().unwrap()
-        })
+        let mut handle = Handle::new(timer, time, self.clock.clone());
+        f(&mut handle)
     }
 }
 

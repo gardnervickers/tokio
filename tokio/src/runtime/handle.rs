@@ -1,3 +1,4 @@
+use crate::runtime::context::ThreadContext;
 use crate::runtime::{blocking, io, time, Spawner};
 
 cfg_rt_core! {
@@ -32,8 +33,18 @@ impl Handle {
     {
         self.blocking_spawner.enter(|| {
             let _io = io::set_default(&self.io_handle);
-
-            time::with_default(&self.time_handle, &self.clock, || self.spawner.enter(f))
+            let _timer_guard = self
+                .time_handle
+                .clone()
+                .map(ThreadContext::set_default_timer);
+            ThreadContext::with_clock(|clock| {
+                assert!(
+                    clock.is_none(),
+                    "default clock already set for execution context"
+                );
+            });
+            let _guard = ThreadContext::set_default_clock(&self.clock as *const time::Clock);
+            self.spawner.enter(f)
         })
     }
 }
