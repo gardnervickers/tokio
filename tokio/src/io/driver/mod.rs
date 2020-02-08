@@ -1,7 +1,10 @@
 pub(crate) mod platform;
 
 mod scheduled_io;
-pub(crate) use scheduled_io::ScheduledIo; // pub(crate) for tests
+
+use crate::io::registration::Registration;
+
+pub(crate) use scheduled_io::ScheduledIo;
 
 use crate::loom::sync::atomic::AtomicUsize;
 use crate::park::{Park, Unpark};
@@ -197,7 +200,7 @@ impl Handle {
     /// # Panics
     ///
     /// This function panics if there is no current reactor set.
-    pub(super) fn current() -> Self {
+    pub(crate) fn current() -> Self {
         context::io_handle()
             .expect("there is no reactor running, must be called from the context of Tokio runtime")
     }
@@ -220,6 +223,36 @@ impl Handle {
     pub(super) fn inner(&self) -> Option<Arc<Inner>> {
         self.inner.upgrade()
     }
+
+    /// TODO: Docs and expose somehow
+    pub(crate) fn register<T>(&self, io: &T) -> io::Result<Registration>
+    where
+        T: Evented,
+    {
+        Registration::new(io, self.clone())
+    }
+
+    /*
+    pub(crate) fn new_tcp_stream(
+        &self,
+        connected: mio::net::TcpStream,
+    ) -> io::Result<TcpStreamInner> {
+        let reg = self.register(&connected)?;
+        let io = PollEvented::new(connected, reg)?;
+        Ok(TcpStreamInner::Mio(io))
+    }
+
+    pub(crate) fn connect_std_tcp_stream(
+        &self,
+        stream: net::TcpStream,
+        addr: &net::SocketAddr,
+    ) -> io::Result<TcpStreamInner> {
+        let io = mio::net::TcpStream::connect_stream(stream, addr)?;
+        let registration = self.register(&io)?;
+        let io = PollEvented::new(io, registration)?;
+        Ok(TcpStreamInner::Mio(io))
+    }
+    */
 }
 
 impl Unpark for Handle {

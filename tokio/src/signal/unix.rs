@@ -286,7 +286,9 @@ impl Driver {
         // either, since we can't compare Handles or assume they will always
         // point to the exact same reactor.
         let stream = globals().receiver.try_clone()?;
-        let wakeup = PollEvented::new(stream)?;
+        let handle = crate::io::driver::Handle::current();
+        let registration = handle.register(&stream)?;
+        let wakeup = PollEvented::new(stream, registration)?;
 
         Ok(Driver { wakeup })
     }

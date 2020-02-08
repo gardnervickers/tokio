@@ -223,5 +223,8 @@ where
             return Err(io::Error::last_os_error());
         }
     }
-    Ok(Some(PollEvented::new(Fd { inner: io })?))
+    let fd = Fd { inner: io };
+    let handle = crate::io::driver::Handle::current();
+    let registration = handle.register(&fd)?;
+    Ok(Some(PollEvented::new(fd, registration)?))
 }

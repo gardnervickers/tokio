@@ -208,12 +208,16 @@ impl TcpListener {
     /// explicitly with [`Handle::enter`](crate::runtime::Handle::enter) function.
     pub fn from_std(listener: net::TcpListener) -> io::Result<TcpListener> {
         let io = mio::net::TcpListener::from_std(listener)?;
-        let io = PollEvented::new(io)?;
+        let handle = crate::io::driver::Handle::current();
+        let registration = handle.register(&io)?;
+        let io = PollEvented::new(io, registration)?;
         Ok(TcpListener { io })
     }
 
     fn new(listener: mio::net::TcpListener) -> io::Result<TcpListener> {
-        let io = PollEvented::new(listener)?;
+        let handle = crate::io::driver::Handle::current();
+        let registration = handle.register(&listener)?;
+        let io = PollEvented::new(listener, registration)?;
         Ok(TcpListener { io })
     }
 

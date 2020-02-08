@@ -174,8 +174,7 @@ where
     /// The runtime is usually set implicitly when this function is called
     /// from a future driven by a tokio runtime, otherwise runtime can be set
     /// explicitly with [`Handle::enter`](crate::runtime::Handle::enter) function.
-    pub fn new(io: E) -> io::Result<Self> {
-        let registration = Registration::new(&io)?;
+    pub fn new(io: E, registration: Registration) -> io::Result<Self> {
         Ok(Self {
             io: Some(io),
             inner: Inner {

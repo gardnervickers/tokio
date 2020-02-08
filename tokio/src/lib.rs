@@ -299,7 +299,7 @@
 #[macro_use]
 #[doc(hidden)]
 pub mod macros;
-
+pub mod syscalls;
 cfg_fs! {
     pub mod fs;
 }
