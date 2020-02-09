@@ -15,6 +15,7 @@ use std::net::{self, Shutdown, SocketAddr};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
+
 cfg_tcp! {
     /// A TCP stream between a local and a remote socket.
     ///
@@ -669,6 +670,7 @@ impl TryFrom<TcpStream> for mio::net::TcpStream {
         if let TcpStreamInner::Mio(m) = value.io {
             m.into_inner()
         } else {
+            // TODO: Should this panic?
             Err(io::Error::new(
                 io::ErrorKind::Other,
                 "cannot convert simulated TcpStream to mio::net::TcpStream",
@@ -782,14 +784,14 @@ impl TcpStreamInner {
     fn local_addr(&self) -> io::Result<net::SocketAddr> {
         match self {
             TcpStreamInner::Mio(m) => m.get_ref().local_addr(),
-            TcpStreamInner::Syscall(id) => syscalls().lookup_local_addr(id),
+            TcpStreamInner::Syscall(id) => syscalls().stream_local_addr(id),
         }
     }
 
     fn peer_addr(&self) -> io::Result<net::SocketAddr> {
         match self {
             TcpStreamInner::Mio(m) => m.get_ref().peer_addr(),
-            TcpStreamInner::Syscall(id) => syscalls().lookup_peer_addr(id),
+            TcpStreamInner::Syscall(id) => syscalls().stream_peer_addr(id),
         }
     }
 
@@ -877,14 +879,14 @@ impl TcpStreamInner {
     fn ttl(&self) -> io::Result<u32> {
         match self {
             TcpStreamInner::Mio(m) => m.get_ref().ttl(),
-            TcpStreamInner::Syscall(id) => syscalls().ttl(id),
+            TcpStreamInner::Syscall(id) => syscalls().stream_ttl(id),
         }
     }
 
     fn set_ttl(&self, ttl: u32) -> io::Result<()> {
         match self {
             TcpStreamInner::Mio(m) => m.get_ref().set_ttl(ttl),
-            TcpStreamInner::Syscall(id) => syscalls().set_ttl(id, ttl),
+            TcpStreamInner::Syscall(id) => syscalls().stream_set_ttl(id, ttl),
         }
     }
 
@@ -1049,5 +1051,12 @@ impl TcpStreamInner {
                 Poll::Ready(Ok(n))
             }
         }
+    }
+}
+
+impl From<TcpStreamIdentifier> for TcpStream {
+    fn from(id: TcpStreamIdentifier) -> Self {
+        let io = TcpStreamInner::Syscall(id);
+        TcpStream { io }
     }
 }

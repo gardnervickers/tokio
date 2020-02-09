@@ -2,6 +2,7 @@ use crate::future::poll_fn;
 use crate::io::PollEvented;
 use crate::net::tcp::{Incoming, TcpStream};
 use crate::net::ToSocketAddrs;
+use crate::syscalls::{syscalls, TcpListenerIdentifier};
 
 use std::convert::TryFrom;
 use std::fmt;
@@ -35,7 +36,7 @@ cfg_tcp! {
     /// }
     /// ```
     pub struct TcpListener {
-        io: PollEvented<mio::net::TcpListener>,
+        io: TcpListenerInner,
     }
 }
 
@@ -136,28 +137,7 @@ impl TcpListener {
         &mut self,
         cx: &mut Context<'_>,
     ) -> Poll<io::Result<(TcpStream, SocketAddr)>> {
-        let (io, addr) = ready!(self.poll_accept_std(cx))?;
-
-        let io = mio::net::TcpStream::from_stream(io)?;
-        let io = TcpStream::new(io)?;
-
-        Poll::Ready(Ok((io, addr)))
-    }
-
-    fn poll_accept_std(
-        &mut self,
-        cx: &mut Context<'_>,
-    ) -> Poll<io::Result<(net::TcpStream, SocketAddr)>> {
-        ready!(self.io.poll_read_ready(cx, mio::Ready::readable()))?;
-
-        match self.io.get_ref().accept_std() {
-            Ok(pair) => Poll::Ready(Ok(pair)),
-            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                self.io.clear_read_ready(cx, mio::Ready::readable())?;
-                Poll::Pending
-            }
-            Err(e) => Poll::Ready(Err(e)),
-        }
+        self.io.poll_accept(cx)
     }
 
     /// Creates a new TCP listener from the standard library's TCP listener.
@@ -211,6 +191,7 @@ impl TcpListener {
         let handle = crate::io::driver::Handle::current();
         let registration = handle.register(&io)?;
         let io = PollEvented::new(io, registration)?;
+        let io = TcpListenerInner::Mio(io);
         Ok(TcpListener { io })
     }
 
@@ -218,6 +199,7 @@ impl TcpListener {
         let handle = crate::io::driver::Handle::current();
         let registration = handle.register(&listener)?;
         let io = PollEvented::new(listener, registration)?;
+        let io = TcpListenerInner::Mio(io);
         Ok(TcpListener { io })
     }
 
@@ -245,7 +227,7 @@ impl TcpListener {
     /// }
     /// ```
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
-        self.io.get_ref().local_addr()
+        self.io.local_addr()
     }
 
     /// Returns a stream over the connections being received on this listener.
@@ -310,7 +292,7 @@ impl TcpListener {
     /// }
     /// ```
     pub fn ttl(&self) -> io::Result<u32> {
-        self.io.get_ref().ttl()
+        self.io.ttl()
     }
 
     /// Sets the value for the `IP_TTL` option on this socket.
@@ -335,7 +317,7 @@ impl TcpListener {
     /// }
     /// ```
     pub fn set_ttl(&self, ttl: u32) -> io::Result<()> {
-        self.io.get_ref().set_ttl(ttl)
+        self.io.set_ttl(ttl)
     }
 }
 
@@ -349,7 +331,15 @@ impl TryFrom<TcpListener> for mio::net::TcpListener {
     ///
     /// [`PollEvented::into_inner`]: crate::io::PollEvented::into_inner
     fn try_from(value: TcpListener) -> Result<Self, Self::Error> {
-        value.io.into_inner()
+        if let TcpListenerInner::Mio(m) = value.io {
+            m.into_inner()
+        } else {
+            // TODO: Should this panic?
+            Err(io::Error::new(
+                io::ErrorKind::Other,
+                "cannot convert simulated TcpStream to mio::net::TcpStream",
+            ))
+        }
     }
 }
 
@@ -367,18 +357,22 @@ impl TryFrom<net::TcpListener> for TcpListener {
 
 impl fmt::Debug for TcpListener {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.io.get_ref().fmt(f)
+        self.io.fmt(f)
     }
 }
 
 #[cfg(unix)]
 mod sys {
-    use super::TcpListener;
+    use super::{TcpListener, TcpListenerInner};
     use std::os::unix::prelude::*;
 
     impl AsRawFd for TcpListener {
         fn as_raw_fd(&self) -> RawFd {
-            self.io.get_ref().as_raw_fd()
+            if let TcpListenerInner::Mio(ref m) = self.io {
+                m.get_ref().as_raw_fd()
+            } else {
+                panic!("cannot get rawfd for simulated type")
+            }
         }
     }
 }
@@ -395,4 +389,61 @@ mod sys {
     //         self.listener.io().as_raw_handle()
     //     }
     // }
+}
+
+#[derive(Debug)]
+pub(crate) enum TcpListenerInner {
+    Mio(PollEvented<mio::net::TcpListener>),
+    Syscall(TcpListenerIdentifier),
+}
+
+impl TcpListenerInner {
+    fn poll_accept(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<(TcpStream, SocketAddr)>> {
+        match self {
+            TcpListenerInner::Mio(m) => {
+                // TODO: refactor this
+                let (io, addr) = ready!({
+                    ready!(m.poll_read_ready(cx, mio::Ready::readable()))?;
+
+                    match m.get_ref().accept_std() {
+                        Ok(pair) => Poll::Ready(Ok(pair)),
+                        Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                            m.clear_read_ready(cx, mio::Ready::readable())?;
+                            Poll::Pending
+                        }
+                        Err(e) => Poll::Ready(Err(e)),
+                    }
+                })?;
+                let io = mio::net::TcpStream::from_stream(io)?;
+                let io = TcpStream::new(io)?;
+                Poll::Ready(Ok((io, addr)))
+            }
+            TcpListenerInner::Syscall(id) => {
+                let (id, addr) = ready!(syscalls().poll_accept(cx, id))?;
+                let io = TcpStream::from(id);
+                Poll::Ready(Ok((io, addr)))
+            }
+        }
+    }
+
+    fn local_addr(&self) -> io::Result<SocketAddr> {
+        match self {
+            TcpListenerInner::Mio(m) => m.get_ref().local_addr(),
+            TcpListenerInner::Syscall(id) => syscalls().listener_local_addr(id),
+        }
+    }
+
+    fn ttl(&self) -> io::Result<u32> {
+        match self {
+            TcpListenerInner::Mio(m) => m.get_ref().ttl(),
+            TcpListenerInner::Syscall(id) => syscalls().listener_ttl(id),
+        }
+    }
+
+    fn set_ttl(&self, ttl: u32) -> io::Result<()> {
+        match self {
+            TcpListenerInner::Mio(m) => m.get_ref().set_ttl(ttl),
+            TcpListenerInner::Syscall(id) => syscalls().listener_set_ttl(id, ttl),
+        }
+    }
 }

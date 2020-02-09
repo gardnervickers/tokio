@@ -84,13 +84,13 @@ pub trait TcpSyscalls {
     ///
     /// [TcpStreamIdentifier]: struct.TcpStreamIdentifier.html
     /// [net::SocketAddr]: std::net::SocketAddr
-    fn lookup_local_addr(&self, ident: &TcpStreamIdentifier) -> io::Result<net::SocketAddr>;
+    fn stream_local_addr(&self, ident: &TcpStreamIdentifier) -> io::Result<net::SocketAddr>;
 
     /// Lookup the [net::SocketAddr] corresponding to the provided [TcpStreamIdentifier]
     ///
     /// [TcpStreamIdentifier]: struct.TcpStreamIdentifier.html
     /// [net::SocketAddr]: std::net::SocketAddr
-    fn lookup_peer_addr(&self, ident: &TcpStreamIdentifier) -> io::Result<net::SocketAddr>;
+    fn stream_peer_addr(&self, ident: &TcpStreamIdentifier) -> io::Result<net::SocketAddr>;
 
     /// Attempts to receive data from the logical stream without removing data from the queue.
     fn poll_peek(
@@ -152,12 +152,12 @@ pub trait TcpSyscalls {
     /// Get the ttl value for this [TcpStreamIdentifier].
     ///
     /// [TcpStreamIdentifier]: struct.TcpStreamIdentifier.html
-    fn ttl(&self, ident: &TcpStreamIdentifier) -> io::Result<u32>;
+    fn stream_ttl(&self, ident: &TcpStreamIdentifier) -> io::Result<u32>;
 
     /// Set the ttl value for this [TcpStreamIdentifer].
     ///
     /// [TcpStreamIdentifier]: struct.TcpStreamIdentifier.html
-    fn set_ttl(&self, ident: &TcpStreamIdentifier, ttl: u32) -> io::Result<()>;
+    fn stream_set_ttl(&self, ident: &TcpStreamIdentifier, ttl: u32) -> io::Result<()>;
 
     /// Get the linger value for this [TcpStreamIdentifier].
     ///
@@ -188,4 +188,29 @@ pub trait TcpSyscalls {
         ident: &TcpStreamIdentifier,
         buf: &[u8],
     ) -> Poll<io::Result<usize>>;
+
+    /// Lookup the [net::SocketAddr] corresponding ot the provided [TcpListenerIdentifier]
+    ///
+    /// [TcpListenerIdentifier]: struct.TcpStreamIdentifier.html
+    /// [net::SocketAddr]: std::net::SocketAddr
+    fn listener_local_addr(&self, ident: &TcpListenerIdentifier) -> io::Result<net::SocketAddr>;
+
+    /// Get the ttl value for this [TcpListenerIdentifier].
+    ///
+    /// [TcpListenerIdentifier]: struct.TcpListenerIdentifier.html
+    fn listener_ttl(&self, ident: &TcpListenerIdentifier) -> io::Result<u32>;
+
+    /// Set the ttl value for this [TcpListenerIdentifer].
+    ///
+    /// [TcpListenerIdentifier]: struct.TcpListenerIdentifier.html
+    fn listener_set_ttl(&self, ident: &TcpListenerIdentifier, ttl: u32) -> io::Result<()>;
+
+    /// Attempts to poll `SocketAddr` and `TcpStream` bound to this [TcpListenerIdentifier].
+    ///
+    /// [TcpListenerIdentifier]: struct.TcpListenerIdentifier.html
+    fn poll_accept(
+        &self,
+        cx: &mut Context<'_>,
+        ident: &TcpListenerIdentifier,
+    ) -> Poll<io::Result<(TcpStreamIdentifier, net::SocketAddr)>>;
 }
