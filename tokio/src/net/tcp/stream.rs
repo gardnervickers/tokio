@@ -127,11 +127,16 @@ impl TcpStream {
     }
 
     pub(crate) fn new(connected: mio::net::TcpStream) -> io::Result<TcpStream> {
-        let handle = context::io_handle().expect("no reactor running");
-        let reg = handle.register(&connected)?;
-        let io = PollEvented::new(connected, reg)?;
-        let io = TcpStreamInner::Mio(io);
-        Ok(TcpStream { io })
+        if let Some(handle) = context::io_handle() {
+            let reg = handle.register(&connected)?;
+            let io = PollEvented::new(connected, reg)?;
+            let io = TcpStreamInner::Mio(io);
+            return Ok(TcpStream { io });
+        } else {
+            
+        }
+
+        panic!("no reactor running");
     }
 
     /// Creates new `TcpStream` from a `std::net::TcpStream`.
