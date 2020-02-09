@@ -392,6 +392,7 @@ mod sys {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub(crate) enum TcpListenerInner {
     Mio(PollEvented<mio::net::TcpListener>),
     Syscall(TcpListenerIdentifier),

@@ -5,6 +5,7 @@ use crate::net::ToSocketAddrs;
 use crate::runtime::context;
 use crate::syscalls::syscalls;
 use crate::syscalls::TcpStreamIdentifier;
+
 use bytes::Buf;
 use iovec::IoVec;
 use std::convert::TryFrom;
@@ -132,10 +133,7 @@ impl TcpStream {
             let io = PollEvented::new(connected, reg)?;
             let io = TcpStreamInner::Mio(io);
             return Ok(TcpStream { io });
-        } else {
-            
         }
-
         panic!("no reactor running");
     }
 
