@@ -3,6 +3,7 @@ use crate::io::{AsyncRead, AsyncWrite, PollEvented};
 use crate::net::tcp::split::{split, ReadHalf, WriteHalf};
 use crate::net::ToSocketAddrs;
 use crate::runtime::context;
+use crate::syscalls::syscalls;
 use crate::syscalls::TcpStreamIdentifier;
 use bytes::Buf;
 use iovec::IoVec;
@@ -14,7 +15,6 @@ use std::net::{self, Shutdown, SocketAddr};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
-
 cfg_tcp! {
     /// A TCP stream between a local and a remote socket.
     ///
@@ -116,20 +116,21 @@ impl TcpStream {
                 }
                 Ok(stream)
             }
-            TcpStreamInner::Syscall(_) => unimplemented!(),
+            TcpStreamInner::Syscall(id) => {
+                let sys = syscalls();
+                poll_fn(|cx| sys.poll_connected(cx, &id)).await?;
+                let io = TcpStreamInner::Syscall(id);
+                Ok(TcpStream { io })
+            }
         }
     }
 
     pub(crate) fn new(connected: mio::net::TcpStream) -> io::Result<TcpStream> {
-        if let Some(handle) = context::io_handle() {
-            let reg = handle.register(&connected)?;
-            let io = PollEvented::new(connected, reg)?;
-            let io = TcpStreamInner::Mio(io);
-            Ok(TcpStream { io })
-        } else {
-            // TODO: Create simulated
-            panic!("no reactor running")
-        }
+        let handle = context::io_handle().expect("no reactor running");
+        let reg = handle.register(&connected)?;
+        let io = PollEvented::new(connected, reg)?;
+        let io = TcpStreamInner::Mio(io);
+        Ok(TcpStream { io })
     }
 
     /// Creates new `TcpStream` from a `std::net::TcpStream`.
@@ -159,16 +160,12 @@ impl TcpStream {
     /// from a future driven by a tokio runtime, otherwise runtime can be set
     /// explicitly with [`Handle::enter`](crate::runtime::Handle::enter) function.
     pub fn from_std(stream: net::TcpStream) -> io::Result<TcpStream> {
-        if let Some(handle) = context::io_handle() {
-            let io = mio::net::TcpStream::from_stream(stream)?;
-            let reg = handle.register(&io)?;
-            let io = PollEvented::new(io, reg)?;
-            let io = TcpStreamInner::Mio(io);
-            Ok(TcpStream { io })
-        } else {
-            // TODO: Simulated TcpStream
-            panic!("no reactor running")
-        }
+        let handle = context::io_handle().expect("no reactor running");
+        let io = mio::net::TcpStream::from_stream(stream)?;
+        let reg = handle.register(&io)?;
+        let io = PollEvented::new(io, reg)?;
+        let io = TcpStreamInner::Mio(io);
+        Ok(TcpStream { io })
     }
 
     // Connects `TcpStream` asynchronously that may be built with a net2 `TcpBuilder`.
@@ -176,19 +173,16 @@ impl TcpStream {
     // This should be removed in favor of some in-crate TcpSocket builder API.
     #[doc(hidden)]
     pub async fn connect_std(stream: net::TcpStream, addr: &SocketAddr) -> io::Result<TcpStream> {
-        if let Some(handle) = context::io_handle() {
-            let io = mio::net::TcpStream::connect_stream(stream, addr)?;
-            let reg = handle.register(&io)?;
-            let io = PollEvented::new(io, reg)?;
-            poll_fn(|cx| io.poll_write_ready(cx)).await?;
-            if let Some(e) = io.get_ref().take_error()? {
-                return Err(e);
-            }
-            let io = TcpStreamInner::Mio(io);
-            Ok(TcpStream { io })
-        } else {
-            todo!("create simulated TcpStream")
+        let handle = context::io_handle().expect("no reactor running");
+        let io = mio::net::TcpStream::connect_stream(stream, addr)?;
+        let reg = handle.register(&io)?;
+        let io = PollEvented::new(io, reg)?;
+        poll_fn(|cx| io.poll_write_ready(cx)).await?;
+        if let Some(e) = io.get_ref().take_error()? {
+            return Err(e);
         }
+        let io = TcpStreamInner::Mio(io);
+        Ok(TcpStream { io })
     }
 
     /// Returns the local address that this stream is bound to.
@@ -788,14 +782,14 @@ impl TcpStreamInner {
     fn local_addr(&self) -> io::Result<net::SocketAddr> {
         match self {
             TcpStreamInner::Mio(m) => m.get_ref().local_addr(),
-            TcpStreamInner::Syscall(_) => todo!(),
+            TcpStreamInner::Syscall(id) => syscalls().lookup_local_addr(id),
         }
     }
 
     fn peer_addr(&self) -> io::Result<net::SocketAddr> {
         match self {
             TcpStreamInner::Mio(m) => m.get_ref().peer_addr(),
-            TcpStreamInner::Syscall(_) => todo!(),
+            TcpStreamInner::Syscall(id) => syscalls().lookup_peer_addr(id),
         }
     }
 
@@ -813,98 +807,98 @@ impl TcpStreamInner {
                     Err(e) => Poll::Ready(Err(e)),
                 }
             }
-            TcpStreamInner::Syscall(_) => todo!(),
+            TcpStreamInner::Syscall(id) => syscalls().poll_peek(cx, id, buf),
         }
     }
 
     fn shutdown(&self, how: Shutdown) -> io::Result<()> {
         match self {
             TcpStreamInner::Mio(m) => m.get_ref().shutdown(how),
-            TcpStreamInner::Syscall(_) => todo!(),
+            TcpStreamInner::Syscall(id) => syscalls().shutdown(id, how),
         }
     }
 
     fn nodelay(&self) -> io::Result<bool> {
         match self {
             TcpStreamInner::Mio(m) => m.get_ref().nodelay(),
-            TcpStreamInner::Syscall(_) => todo!(),
+            TcpStreamInner::Syscall(id) => syscalls().nodelay(id),
         }
     }
 
     fn set_nodelay(&self, nodelay: bool) -> io::Result<()> {
         match self {
             TcpStreamInner::Mio(m) => m.get_ref().set_nodelay(nodelay),
-            TcpStreamInner::Syscall(_) => todo!(),
+            TcpStreamInner::Syscall(id) => syscalls().set_nodelay(id, nodelay),
         }
     }
 
     fn recv_buffer_size(&self) -> io::Result<usize> {
         match self {
             TcpStreamInner::Mio(m) => m.get_ref().recv_buffer_size(),
-            TcpStreamInner::Syscall(_) => todo!(),
+            TcpStreamInner::Syscall(id) => syscalls().recv_buffer_size(id),
         }
     }
 
     fn set_recv_buffer_size(&self, size: usize) -> io::Result<()> {
         match self {
             TcpStreamInner::Mio(m) => m.get_ref().set_recv_buffer_size(size),
-            TcpStreamInner::Syscall(_) => todo!(),
+            TcpStreamInner::Syscall(id) => syscalls().set_recv_buffer_size(id, size),
         }
     }
 
     fn send_buffer_size(&self) -> io::Result<usize> {
         match self {
             TcpStreamInner::Mio(m) => m.get_ref().send_buffer_size(),
-            TcpStreamInner::Syscall(_) => todo!(),
+            TcpStreamInner::Syscall(id) => syscalls().send_buffer_size(id),
         }
     }
 
     fn set_send_buffer_size(&self, size: usize) -> io::Result<()> {
         match self {
             TcpStreamInner::Mio(m) => m.get_ref().set_send_buffer_size(size),
-            TcpStreamInner::Syscall(_) => todo!(),
+            TcpStreamInner::Syscall(id) => syscalls().set_send_buffer_size(id, size),
         }
     }
 
     fn keepalive(&self) -> io::Result<Option<Duration>> {
         match self {
             TcpStreamInner::Mio(m) => m.get_ref().keepalive(),
-            TcpStreamInner::Syscall(_) => todo!(),
+            TcpStreamInner::Syscall(id) => syscalls().keepalive(id),
         }
     }
 
     fn set_keepalive(&self, keepalive: Option<Duration>) -> io::Result<()> {
         match self {
             TcpStreamInner::Mio(m) => m.get_ref().set_keepalive(keepalive),
-            TcpStreamInner::Syscall(_) => todo!(),
+            TcpStreamInner::Syscall(id) => syscalls().set_keepalive(id, keepalive),
         }
     }
 
     fn ttl(&self) -> io::Result<u32> {
         match self {
             TcpStreamInner::Mio(m) => m.get_ref().ttl(),
-            TcpStreamInner::Syscall(_) => todo!(),
+            TcpStreamInner::Syscall(id) => syscalls().ttl(id),
         }
     }
 
     fn set_ttl(&self, ttl: u32) -> io::Result<()> {
         match self {
             TcpStreamInner::Mio(m) => m.get_ref().set_ttl(ttl),
-            TcpStreamInner::Syscall(_) => todo!(),
+            TcpStreamInner::Syscall(id) => syscalls().set_ttl(id, ttl),
         }
     }
 
     fn linger(&self) -> io::Result<Option<Duration>> {
         match self {
             TcpStreamInner::Mio(m) => m.get_ref().linger(),
-            TcpStreamInner::Syscall(_) => todo!(),
+            TcpStreamInner::Syscall(id) => syscalls().linger(id),
         }
     }
 
     fn set_linger(&self, dur: Option<Duration>) -> io::Result<()> {
         match self {
             TcpStreamInner::Mio(m) => m.get_ref().set_linger(dur),
-            TcpStreamInner::Syscall(_) => todo!(),
+            TcpStreamInner::Syscall(id) => syscalls().set_linger(id, dur),
         }
     }
 
@@ -921,7 +915,7 @@ impl TcpStreamInner {
                     x => Poll::Ready(x),
                 }
             }
-            TcpStreamInner::Syscall(_) => todo!(),
+            TcpStreamInner::Syscall(id) => syscalls().poll_read_priv(cx, id, buf),
         }
     }
 
@@ -938,7 +932,7 @@ impl TcpStreamInner {
                     x => Poll::Ready(x),
                 }
             }
-            TcpStreamInner::Syscall(_) => todo!(),
+            TcpStreamInner::Syscall(id) => syscalls().poll_write_priv(cx, id, buf),
         }
     }
 
@@ -1046,7 +1040,14 @@ impl TcpStreamInner {
                     Err(e) => Poll::Ready(Err(e)),
                 }
             }
-            TcpStreamInner::Syscall(_) => todo!(),
+            TcpStreamInner::Syscall(_) => {
+                if !buf.has_remaining() {
+                    return Poll::Ready(Ok(0));
+                }
+                let n = ready!(self.poll_write_priv(cx, buf.bytes()))?;
+                buf.advance(n);
+                Poll::Ready(Ok(n))
+            }
         }
     }
 }
