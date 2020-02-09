@@ -231,28 +231,6 @@ impl Handle {
     {
         Registration::new(io, self.clone())
     }
-
-    /*
-    pub(crate) fn new_tcp_stream(
-        &self,
-        connected: mio::net::TcpStream,
-    ) -> io::Result<TcpStreamInner> {
-        let reg = self.register(&connected)?;
-        let io = PollEvented::new(connected, reg)?;
-        Ok(TcpStreamInner::Mio(io))
-    }
-
-    pub(crate) fn connect_std_tcp_stream(
-        &self,
-        stream: net::TcpStream,
-        addr: &net::SocketAddr,
-    ) -> io::Result<TcpStreamInner> {
-        let io = mio::net::TcpStream::connect_stream(stream, addr)?;
-        let registration = self.register(&io)?;
-        let io = PollEvented::new(io, registration)?;
-        Ok(TcpStreamInner::Mio(io))
-    }
-    */
 }
 
 impl Unpark for Handle {
