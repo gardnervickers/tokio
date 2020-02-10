@@ -2,7 +2,8 @@ use crate::future::poll_fn;
 use crate::io::PollEvented;
 use crate::net::tcp::{Incoming, TcpStream};
 use crate::net::ToSocketAddrs;
-use crate::syscalls::{syscalls, TcpListenerIdentifier};
+use crate::runtime::context::syscalls;
+use crate::syscalls::TcpListenerIdentifier;
 
 use std::convert::TryFrom;
 use std::fmt;
@@ -420,7 +421,8 @@ impl TcpListenerInner {
                 Poll::Ready(Ok((io, addr)))
             }
             TcpListenerInner::Syscall(id) => {
-                let (id, addr) = ready!(syscalls().poll_accept(cx, id))?;
+                let (id, addr) =
+                    ready!(syscalls().expect("no syscalls running").poll_accept(cx, id))?;
                 let io = TcpStream::from(id);
                 Poll::Ready(Ok((io, addr)))
             }
@@ -430,21 +432,27 @@ impl TcpListenerInner {
     fn local_addr(&self) -> io::Result<SocketAddr> {
         match self {
             TcpListenerInner::Mio(m) => m.get_ref().local_addr(),
-            TcpListenerInner::Syscall(id) => syscalls().listener_local_addr(id),
+            TcpListenerInner::Syscall(id) => syscalls()
+                .expect("no syscalls running")
+                .listener_local_addr(id),
         }
     }
 
     fn ttl(&self) -> io::Result<u32> {
         match self {
             TcpListenerInner::Mio(m) => m.get_ref().ttl(),
-            TcpListenerInner::Syscall(id) => syscalls().listener_ttl(id),
+            TcpListenerInner::Syscall(id) => {
+                syscalls().expect("no syscalls running").listener_ttl(id)
+            }
         }
     }
 
     fn set_ttl(&self, ttl: u32) -> io::Result<()> {
         match self {
             TcpListenerInner::Mio(m) => m.get_ref().set_ttl(ttl),
-            TcpListenerInner::Syscall(id) => syscalls().listener_set_ttl(id, ttl),
+            TcpListenerInner::Syscall(id) => syscalls()
+                .expect("no syscalls running")
+                .listener_set_ttl(id, ttl),
         }
     }
 }

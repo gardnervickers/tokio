@@ -8,10 +8,6 @@ use std::task::Context;
 use std::time;
 use std::{io, net, vec};
 
-pub(crate) fn syscalls() -> Box<dyn Syscalls> {
-    unimplemented!()
-}
-
 /// A value which can be resolved to a SocketAddr. Usually, these come
 /// in two forms. Either a hostname/port string like "localhost:8080", or
 /// a hostname port tuple like ("localhost", 8080).
@@ -38,12 +34,13 @@ impl<'a> From<&'a (&'a str, u16)> for Resolveable<'a> {
 /// TcpStreamIdentifier represents a TCP stream with respect to the Syscall trait.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TcpStreamIdentifier(u64);
+
 /// TcpListenerIdentifier represents a TCP listener with respect to the Syscall trait.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TcpListenerIdentifier(u64);
 
 /// Extension points for Tokio.
-pub trait Syscalls: TcpSyscalls + Send + Sync {
+pub trait Syscalls: TcpSyscalls + Send + Sync + std::fmt::Debug {
     /// Resolve the provided [Resolveable] to one or more [net::SocketAddr] entries.
     ///
     /// [Resolveable]: struct.Resolveable.html

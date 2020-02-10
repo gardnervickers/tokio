@@ -1,5 +1,5 @@
 use crate::runtime::{blocking, context, io, time, Spawner};
-use std::{error, fmt};
+use std::{error, fmt, sync::Arc};
 
 cfg_rt_core! {
     use crate::task::JoinHandle;
@@ -23,6 +23,8 @@ pub struct Handle {
 
     /// Blocking pool spawner
     pub(super) blocking_spawner: blocking::Spawner,
+
+    pub(super) syscalls: Option<Arc<dyn crate::syscalls::Syscalls>>,
 }
 
 impl Handle {

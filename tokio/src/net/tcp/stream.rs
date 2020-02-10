@@ -3,7 +3,6 @@ use crate::io::{AsyncRead, AsyncWrite, PollEvented};
 use crate::net::tcp::split::{split, ReadHalf, WriteHalf};
 use crate::net::ToSocketAddrs;
 use crate::runtime::context;
-use crate::syscalls::syscalls;
 use crate::syscalls::TcpStreamIdentifier;
 
 use bytes::Buf;
@@ -119,7 +118,7 @@ impl TcpStream {
                 Ok(stream)
             }
             TcpStreamInner::Syscall(id) => {
-                let sys = syscalls();
+                let sys = context::syscalls().expect("no syscalls running");
                 poll_fn(|cx| sys.poll_connected(cx, &id)).await?;
                 let io = TcpStreamInner::Syscall(id);
                 Ok(TcpStream { io })
@@ -133,7 +132,7 @@ impl TcpStream {
             let io = PollEvented::new(connected, reg)?;
             let io = TcpStreamInner::Mio(io);
             return Ok(TcpStream { io });
-        }
+        };
         panic!("no reactor running");
     }
 
@@ -787,14 +786,18 @@ impl TcpStreamInner {
     fn local_addr(&self) -> io::Result<net::SocketAddr> {
         match self {
             TcpStreamInner::Mio(m) => m.get_ref().local_addr(),
-            TcpStreamInner::Syscall(id) => syscalls().stream_local_addr(id),
+            TcpStreamInner::Syscall(id) => context::syscalls()
+                .expect("no syscalls running")
+                .stream_local_addr(id),
         }
     }
 
     fn peer_addr(&self) -> io::Result<net::SocketAddr> {
         match self {
             TcpStreamInner::Mio(m) => m.get_ref().peer_addr(),
-            TcpStreamInner::Syscall(id) => syscalls().stream_peer_addr(id),
+            TcpStreamInner::Syscall(id) => context::syscalls()
+                .expect("no syscalls running")
+                .stream_peer_addr(id),
         }
     }
 
@@ -812,98 +815,126 @@ impl TcpStreamInner {
                     Err(e) => Poll::Ready(Err(e)),
                 }
             }
-            TcpStreamInner::Syscall(id) => syscalls().poll_peek(cx, id, buf),
+            TcpStreamInner::Syscall(id) => context::syscalls()
+                .expect("no syscalls running")
+                .poll_peek(cx, id, buf),
         }
     }
 
     fn shutdown(&self, how: Shutdown) -> io::Result<()> {
         match self {
             TcpStreamInner::Mio(m) => m.get_ref().shutdown(how),
-            TcpStreamInner::Syscall(id) => syscalls().shutdown(id, how),
+            TcpStreamInner::Syscall(id) => context::syscalls()
+                .expect("no syscalls running")
+                .shutdown(id, how),
         }
     }
 
     fn nodelay(&self) -> io::Result<bool> {
         match self {
             TcpStreamInner::Mio(m) => m.get_ref().nodelay(),
-            TcpStreamInner::Syscall(id) => syscalls().nodelay(id),
+            TcpStreamInner::Syscall(id) => context::syscalls()
+                .expect("no syscalls running")
+                .nodelay(id),
         }
     }
 
     fn set_nodelay(&self, nodelay: bool) -> io::Result<()> {
         match self {
             TcpStreamInner::Mio(m) => m.get_ref().set_nodelay(nodelay),
-            TcpStreamInner::Syscall(id) => syscalls().set_nodelay(id, nodelay),
+            TcpStreamInner::Syscall(id) => context::syscalls()
+                .expect("no syscalls running")
+                .set_nodelay(id, nodelay),
         }
     }
 
     fn recv_buffer_size(&self) -> io::Result<usize> {
         match self {
             TcpStreamInner::Mio(m) => m.get_ref().recv_buffer_size(),
-            TcpStreamInner::Syscall(id) => syscalls().recv_buffer_size(id),
+            TcpStreamInner::Syscall(id) => context::syscalls()
+                .expect("no syscalls running")
+                .recv_buffer_size(id),
         }
     }
 
     fn set_recv_buffer_size(&self, size: usize) -> io::Result<()> {
         match self {
             TcpStreamInner::Mio(m) => m.get_ref().set_recv_buffer_size(size),
-            TcpStreamInner::Syscall(id) => syscalls().set_recv_buffer_size(id, size),
+            TcpStreamInner::Syscall(id) => context::syscalls()
+                .expect("no syscalls running")
+                .set_recv_buffer_size(id, size),
         }
     }
 
     fn send_buffer_size(&self) -> io::Result<usize> {
         match self {
             TcpStreamInner::Mio(m) => m.get_ref().send_buffer_size(),
-            TcpStreamInner::Syscall(id) => syscalls().send_buffer_size(id),
+            TcpStreamInner::Syscall(id) => context::syscalls()
+                .expect("no syscalls running")
+                .send_buffer_size(id),
         }
     }
 
     fn set_send_buffer_size(&self, size: usize) -> io::Result<()> {
         match self {
             TcpStreamInner::Mio(m) => m.get_ref().set_send_buffer_size(size),
-            TcpStreamInner::Syscall(id) => syscalls().set_send_buffer_size(id, size),
+            TcpStreamInner::Syscall(id) => context::syscalls()
+                .expect("no syscalls running")
+                .set_send_buffer_size(id, size),
         }
     }
 
     fn keepalive(&self) -> io::Result<Option<Duration>> {
         match self {
             TcpStreamInner::Mio(m) => m.get_ref().keepalive(),
-            TcpStreamInner::Syscall(id) => syscalls().keepalive(id),
+            TcpStreamInner::Syscall(id) => context::syscalls()
+                .expect("no syscalls running")
+                .keepalive(id),
         }
     }
 
     fn set_keepalive(&self, keepalive: Option<Duration>) -> io::Result<()> {
         match self {
             TcpStreamInner::Mio(m) => m.get_ref().set_keepalive(keepalive),
-            TcpStreamInner::Syscall(id) => syscalls().set_keepalive(id, keepalive),
+            TcpStreamInner::Syscall(id) => context::syscalls()
+                .expect("no syscalls running")
+                .set_keepalive(id, keepalive),
         }
     }
 
     fn ttl(&self) -> io::Result<u32> {
         match self {
             TcpStreamInner::Mio(m) => m.get_ref().ttl(),
-            TcpStreamInner::Syscall(id) => syscalls().stream_ttl(id),
+            TcpStreamInner::Syscall(id) => context::syscalls()
+                .expect("no syscalls running")
+                .stream_ttl(id),
         }
     }
 
     fn set_ttl(&self, ttl: u32) -> io::Result<()> {
         match self {
             TcpStreamInner::Mio(m) => m.get_ref().set_ttl(ttl),
-            TcpStreamInner::Syscall(id) => syscalls().stream_set_ttl(id, ttl),
+            TcpStreamInner::Syscall(id) => context::syscalls()
+                .expect("no syscalls running")
+                .stream_set_ttl(id, ttl),
         }
     }
 
     fn linger(&self) -> io::Result<Option<Duration>> {
         match self {
             TcpStreamInner::Mio(m) => m.get_ref().linger(),
-            TcpStreamInner::Syscall(id) => syscalls().linger(id),
+            TcpStreamInner::Syscall(id) => {
+                context::syscalls().expect("no syscalls running").linger(id)
+            }
         }
     }
 
     fn set_linger(&self, dur: Option<Duration>) -> io::Result<()> {
         match self {
             TcpStreamInner::Mio(m) => m.get_ref().set_linger(dur),
-            TcpStreamInner::Syscall(id) => syscalls().set_linger(id, dur),
+            TcpStreamInner::Syscall(id) => context::syscalls()
+                .expect("no syscalls running")
+                .set_linger(id, dur),
         }
     }
 
@@ -920,7 +951,9 @@ impl TcpStreamInner {
                     x => Poll::Ready(x),
                 }
             }
-            TcpStreamInner::Syscall(id) => syscalls().poll_read_priv(cx, id, buf),
+            TcpStreamInner::Syscall(id) => context::syscalls()
+                .expect("no syscalls running")
+                .poll_read_priv(cx, id, buf),
         }
     }
 
@@ -937,7 +970,9 @@ impl TcpStreamInner {
                     x => Poll::Ready(x),
                 }
             }
-            TcpStreamInner::Syscall(id) => syscalls().poll_write_priv(cx, id, buf),
+            TcpStreamInner::Syscall(id) => context::syscalls()
+                .expect("no syscalls running")
+                .poll_write_priv(cx, id, buf),
         }
     }
 

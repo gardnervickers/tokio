@@ -336,6 +336,7 @@ impl Builder {
                 time_handle,
                 clock,
                 blocking_spawner,
+                syscalls: None,
             },
             blocking_pool,
         })
@@ -429,6 +430,7 @@ cfg_rt_core! {
                     time_handle,
                     clock,
                     blocking_spawner,
+                    syscalls: None
                 },
                 blocking_pool,
             })
@@ -468,6 +470,7 @@ cfg_rt_threaded! {
                 time_handle,
                 clock,
                 blocking_spawner,
+                syscalls: None,
             };
 
             // Spawn the thread pool workers

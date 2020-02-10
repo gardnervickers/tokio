@@ -1,7 +1,7 @@
 //! Thread local runtime context
 use crate::runtime::Handle;
-
 use std::cell::RefCell;
+use std::sync::Arc;
 
 thread_local! {
     static CONTEXT: RefCell<Option<Handle>> = RefCell::new(None)
@@ -45,6 +45,13 @@ cfg_rt_core! {
             None => None,
         })
     }
+}
+
+pub(crate) fn syscalls() -> Option<Arc<dyn crate::syscalls::Syscalls>> {
+    CONTEXT.with(|ctx| match *ctx.borrow() {
+        Some(ref ctx) => ctx.syscalls.clone(),
+        None => None,
+    })
 }
 
 /// Set this [`ThreadContext`] as the current active [`ThreadContext`].
